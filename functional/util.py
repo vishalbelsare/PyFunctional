@@ -1,17 +1,22 @@
-import collections
+from __future__ import annotations
 import math
+from collections.abc import Iterable
 from functools import reduce
 from itertools import chain, count, islice, takewhile
 from multiprocessing import Pool, cpu_count
+from typing import Any, NamedTuple, TYPE_CHECKING
 
-import dill as serializer
+import dill as serializer  # type: ignore[import-untyped]
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
 
 
 PROTOCOL = serializer.HIGHEST_PROTOCOL
 CPU_COUNT = cpu_count()
 
 
-def is_primitive(val):
+def is_primitive(val) -> TypeGuard[str | bool | float | complex | bytes | int]:
     """
     Checks if the passed value is a primitive type.
 
@@ -38,7 +43,7 @@ def is_primitive(val):
     return isinstance(val, (str, bool, float, complex, bytes, int))
 
 
-def is_namedtuple(val):
+def is_namedtuple(val) -> TypeGuard[NamedTuple]:
     """
     Use Duck Typing to check if val is a named tuple. Checks that val is of type tuple and contains
     the attribute _fields which is defined for named tuples.
@@ -49,7 +54,7 @@ def is_namedtuple(val):
     bases = val_type.__bases__
     if len(bases) != 1 or bases[0] != tuple:
         return False
-    fields = getattr(val_type, "_fields", None)
+    fields = getattr(val_type, "_fields")
     return all(isinstance(n, str) for n in fields)
 
 
@@ -69,7 +74,7 @@ def identity(arg):
 
 def is_iterable(val):
     """
-    Check if val is not a list, but is a collections.Iterable type. This is used to determine
+    Check if val is not a list, but is a Iterable type. This is used to determine
     when list() should be called on val
 
     >>> l = [1, 2]
@@ -79,19 +84,15 @@ def is_iterable(val):
     True
 
     :param val: value to check
-    :return: True if it is not a list, but is a collections.Iterable
+    :return: True if it is not a list, but is a Iterable
     """
-    if isinstance(val, list):
-        return False
-    return isinstance(val, collections.abc.Iterable)
+    return not isinstance(val, list) and isinstance(val, Iterable)
 
 
-def is_tabulatable(val):
-    if is_primitive(val):
-        return False
-    if is_iterable(val) or is_namedtuple(val) or isinstance(val, list):
-        return True
-    return False
+def is_tabulatable(val: object) -> bool:
+    return not is_primitive(val) and (
+        is_iterable(val) or is_namedtuple(val) or isinstance(val, list)
+    )
 
 
 def split_every(parts, iterable):
@@ -117,7 +118,7 @@ def unpack(packed):
     """
     func, args = serializer.loads(packed)
     result = func(*args)
-    if isinstance(result, collections.abc.Iterable):
+    if isinstance(result, Iterable):
         return list(result)
     return None
 
@@ -161,12 +162,10 @@ def lazy_parallelize(func, result, processes=None, partition_size=None):
     else:
         processes = min(processes, CPU_COUNT)
     partition_size = partition_size or compute_partition_size(result, processes)
-    pool = Pool(processes=processes)
-    partitions = split_every(partition_size, iter(result))
-    packed_partitions = (pack(func, (partition,)) for partition in partitions)
-    for pool_result in pool.imap(unpack, packed_partitions):
-        yield pool_result
-    pool.terminate()
+    with Pool(processes=processes) as pool:
+        partitions = split_every(partition_size, iter(result))
+        packed_partitions = (pack(func, (partition,)) for partition in partitions)
+        yield from pool.imap(unpack, packed_partitions)
 
 
 def compute_partition_size(result, processes):
@@ -194,7 +193,7 @@ def compose(*functions):
     return reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
 
 
-def default_value(*vals):
+def default_value(*vals: Any):
     for val in vals:
         if val is not None:
             return val

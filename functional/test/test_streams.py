@@ -17,7 +17,7 @@ class TestStreams(unittest.TestCase):
         self.seq_c_disabled = Stream(disable_compression=True)
 
     def test_open(self):
-        with open("LICENSE.txt") as f:
+        with open("LICENSE.txt", encoding="utf8") as f:
             data = f.readlines()
         self.assertListEqual(data, self.seq.open("LICENSE.txt").to_list())
 
@@ -64,11 +64,65 @@ class TestStreams(unittest.TestCase):
         data = [-5, -3, -1, 1, 3, 5, 7]
         self.assertListEqual(data, self.seq.range(-5, 8, 2).to_list())
 
+    def test_lazyiness(self):
+        def yielder():
+            nonlocal step
+            step += 1
+            yield 1
+            step += 1
+            yield 2
+
+        step = 0
+        sequence = iter(seq(yielder()).map(str))
+        assert (
+            step == 0
+            and next(sequence) == "1"
+            and step == 1
+            and next(sequence) == "2"
+            and step == 2
+        )
+
+        step = 0
+        sequence = iter(seq.chain(yielder()).map(str))
+        assert (
+            step == 0
+            and next(sequence) == "1"
+            and step == 1
+            and next(sequence) == "2"
+            and step == 2
+        )
+
+    def test_chain(self):
+        data_a = range(1, 5)
+        data_b = range(6, 11)
+        self.assertEqual(
+            list(data_a) + list(data_b), self.seq.chain(data_a, data_b).to_list()
+        )
+
+        data_c = set(data_b)
+        self.assertEqual(
+            list(data_a) + list(data_c), self.seq.chain(data_a, data_c).to_list()
+        )
+
+        data_d = {"a": 1, "b": 2}
+        self.assertEqual(
+            list(data_a) + list(data_d.keys()), self.seq.chain(data_a, data_d).to_list()
+        )
+
+        self.assertEqual([], self.seq.chain().to_list())
+
+        with self.assertRaises(TypeError):
+            self.seq.chain(1, 2).to_list()
+
+        self.assertEqual(list(data_a), self.seq.chain(data_a).to_list())
+
+        self.assertEqual([1], self.seq.chain([1]).to_list())
+
     def test_csv(self):
         result = self.seq.csv("functional/test/data/test.csv").to_list()
         expect = [["1", "2", "3", "4"], ["a", "b", "c", "d"]]
         self.assertEqual(expect, result)
-        with open("functional/test/data/test.csv", "r") as csv_file:
+        with open("functional/test/data/test.csv", "r", encoding="utf8") as csv_file:
             self.assertEqual(expect, self.seq.csv(csv_file).to_list())
         with self.assertRaises(ValueError):
             self.seq.csv(1)
@@ -84,7 +138,7 @@ class TestStreams(unittest.TestCase):
         self.assertEqual(result[1]["b"], "5")
         self.assertEqual(result[1]["c"], "6")
 
-        with open("functional/test/data/test_header.csv", "r") as f:
+        with open("functional/test/data/test_header.csv", "r", encoding="utf8") as f:
             result = self.seq.csv_dict_reader(f).to_list()
         self.assertEqual(result[0]["a"], "1")
         self.assertEqual(result[0]["b"], "2")
@@ -144,17 +198,17 @@ class TestStreams(unittest.TestCase):
         list_test_path = "functional/test/data/test_list.json"
         dict_test_path = "functional/test/data/test_dict.json"
         list_expect = [1, 2, 3, 4, 5]
-        dict_expect = list({u"a": 1, u"b": 2, u"c": 3}.items())
+        dict_expect = list({"a": 1, "b": 2, "c": 3}.items())
 
         result = self.seq.json(list_test_path).to_list()
         self.assertEqual(list_expect, result)
         result = self.seq.json(dict_test_path).to_list()
         self.assertEqual(dict_expect, result)
 
-        with open(list_test_path) as file_handle:
+        with open(list_test_path, encoding="utf8") as file_handle:
             result = self.seq.json(file_handle).to_list()
             self.assertEqual(list_expect, result)
-        with open(dict_test_path) as file_handle:
+        with open(dict_test_path, encoding="utf8") as file_handle:
             result = self.seq.json(file_handle).to_list()
             self.assertEqual(dict_expect, result)
 
@@ -165,7 +219,7 @@ class TestStreams(unittest.TestCase):
         list_test_path = "functional/test/data/test_list.json.gz"
         dict_test_path = "functional/test/data/test_dict.json.gz"
         list_expect = [1, 2, 3, 4, 5]
-        dict_expect = list({u"a": 1, u"b": 2, u"c": 3}.items())
+        dict_expect = list({"a": 1, "b": 2, "c": 3}.items())
 
         result = self.seq.json(list_test_path).to_list()
         self.assertEqual(list_expect, result)
@@ -179,7 +233,7 @@ class TestStreams(unittest.TestCase):
         list_test_path = "functional/test/data/test_list.json.bz2"
         dict_test_path = "functional/test/data/test_dict.json.bz2"
         list_expect = [1, 2, 3, 4, 5]
-        dict_expect = list({u"a": 1, u"b": 2, u"c": 3}.items())
+        dict_expect = list({"a": 1, "b": 2, "c": 3}.items())
 
         result = self.seq.json(list_test_path).to_list()
         self.assertEqual(list_expect, result)
@@ -193,7 +247,7 @@ class TestStreams(unittest.TestCase):
         list_test_path = "functional/test/data/test_list.json.xz"
         dict_test_path = "functional/test/data/test_dict.json.xz"
         list_expect = [1, 2, 3, 4, 5]
-        dict_expect = list({u"a": 1, u"b": 2, u"c": 3}.items())
+        dict_expect = list({"a": 1, "b": 2, "c": 3}.items())
 
         result = self.seq.json(list_test_path).to_list()
         self.assertEqual(list_expect, result)
@@ -262,11 +316,11 @@ class TestStreams(unittest.TestCase):
         tmp_path = "functional/test/data/tmp/output.txt"
         sequence = self.seq(1, 2, 3, 4)
         sequence.to_file(tmp_path)
-        with open(tmp_path, "r") as output:
+        with open(tmp_path, "r", encoding="utf8") as output:
             self.assertEqual("[1, 2, 3, 4]", output.readlines()[0])
 
         sequence.to_file(tmp_path, delimiter=":")
-        with open(tmp_path, "r") as output:
+        with open(tmp_path, "r", encoding="utf8") as output:
             self.assertEqual("1:2:3:4", output.readlines()[0])
 
     def test_to_file_compressed(self):
@@ -312,22 +366,22 @@ class TestStreams(unittest.TestCase):
 
     def test_to_json(self):
         tmp_path = "functional/test/data/tmp/output.txt"
-        elements = [[u"a", 1], [u"b", 2], [u"c", 3]]
+        elements = [["a", 1], ["b", 2], ["c", 3]]
         sequence = self.seq(elements)
 
         sequence.to_json(tmp_path)
         result = self.seq.json(tmp_path).to_list()
         self.assertEqual(elements, result)
 
-        dict_expect = {u"a": 1, u"b": 2, u"c": 3}
+        dict_expect = {"a": 1, "b": 2, "c": 3}
         sequence.to_json(tmp_path, root_array=False)
         result = self.seq.json(tmp_path).to_dict()
         self.assertEqual(dict_expect, result)
 
     def test_to_json_compressed(self):
         tmp_path = "functional/test/data/tmp/output.txt"
-        elements = [[u"a", 1], [u"b", 2], [u"c", 3]]
-        dict_expect = {u"a": 1, u"b": 2, u"c": 3}
+        elements = [["a", 1], ["b", 2], ["c", 3]]
+        dict_expect = {"a": 1, "b": 2, "c": 3}
         sequence = self.seq(elements)
 
         sequence.to_json(tmp_path, compression="gzip")
