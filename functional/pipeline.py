@@ -1,6 +1,8 @@
 """
 The pipeline module contains the transformations and actions API of PyFunctional
 """
+
+from __future__ import annotations
 from operator import mul, add
 import collections
 from functools import reduce, wraps, partial
@@ -9,6 +11,10 @@ import json
 import csv
 import sqlite3
 import re
+
+from typing import TYPE_CHECKING
+import typing
+from typing import NamedTuple, TypeVar, Generic, overload
 
 from tabulate import tabulate
 
@@ -27,14 +33,54 @@ from functional import transformations
 from functional.execution import ExecutionStrategies
 
 
-class Sequence(object):
+_T_co = TypeVar("_T_co", covariant=True)  # Main Sequence Generic Type
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    # pylint: disable=deprecated-class
+    from typing import Callable, Any, NoReturn
+    from collections.abc import Iterator, Hashable
+    from _typeshed import SupportsRichComparison
+    from _typeshed import SupportsRichComparisonT
+    from typing_extensions import TypeGuard
+    from typing_extensions import Self
+
+    from lzma import _FilterChain
+    from pandas import DataFrame
+
+    # pylint: disable=invalid-name
+    _T1 = TypeVar("_T1")
+    _T2 = TypeVar("_T2")
+    _T3 = TypeVar("_T3")
+    _T4 = TypeVar("_T4")
+    _T5 = TypeVar("_T5")
+    _T6 = TypeVar("_T6")
+
+    _T = TypeVar("_T")
+    _U = TypeVar("_U")
+    _V = TypeVar("_V")
+    _K = TypeVar("_K")
+
+    _P = TypeVar("_P")
+    _R = TypeVar("_R")
+
+
+class Sequence(Generic[_T_co]):
     """
     Sequence is a wrapper around any type of sequence which provides access to common
     functional transformations and reductions in a data pipeline style
     """
 
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     def __init__(
-        self, sequence, transform=None, engine=None, max_repr_items=None, no_wrap=None
+        self,
+        sequence: Iterable[_T_co],
+        transform=None,
+        engine: ExecutionEngine | None = None,
+        max_repr_items: int | None = None,
+        no_wrap: bool | None = None,
     ):
         # pylint: disable=protected-access
         """
@@ -51,9 +97,13 @@ class Sequence(object):
         """
         self.engine = engine or ExecutionEngine()
         if isinstance(sequence, Sequence):
-            self._max_repr_items = max_repr_items or sequence._max_repr_items
-            self._base_sequence = sequence._base_sequence
-            self._lineage = Lineage(prior_lineage=sequence._lineage, engine=engine)
+            self._max_repr_items: int | None = (
+                max_repr_items or sequence._max_repr_items
+            )
+            self._base_sequence: Iterable | list | tuple = sequence._base_sequence
+            self._lineage: Lineage = Lineage(
+                prior_lineage=sequence._lineage, engine=engine
+            )
         elif isinstance(sequence, (list, tuple)) or is_iterable(sequence):
             self._max_repr_items = max_repr_items
             self._base_sequence = sequence
@@ -64,7 +114,7 @@ class Sequence(object):
             self._lineage.apply(transform)
         self.no_wrap = no_wrap
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[_T_co]:
         """
         Return iterator of sequence.
 
@@ -72,7 +122,7 @@ class Sequence(object):
         """
         return self._evaluate()
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         """
         Checks for equality with the sequence's equality operator.
 
@@ -81,7 +131,7 @@ class Sequence(object):
         """
         return self.sequence == other
 
-    def __ne__(self, other):
+    def __ne__(self, other) -> bool:
         """
         Checks for inequality with the sequence's inequality operator.
 
@@ -90,7 +140,7 @@ class Sequence(object):
         """
         return self.sequence != other
 
-    def __hash__(self):
+    def __hash__(self) -> NoReturn:
         """
         Return the hash of the sequence.
 
@@ -98,7 +148,7 @@ class Sequence(object):
         """
         raise TypeError("unhashable type: Sequence")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Return repr using sequence's repr function.
 
@@ -110,7 +160,7 @@ class Sequence(object):
         else:
             return repr(items[: self._max_repr_items])[:-1] + ", ...]"
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Return string using sequence's string function.
 
@@ -118,7 +168,7 @@ class Sequence(object):
         """
         return str(self.to_list())
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         """
         Returns True if size is not zero.
 
@@ -126,7 +176,7 @@ class Sequence(object):
         """
         return self.size() != 0
 
-    def __nonzero__(self):
+    def __nonzero__(self) -> bool:
         """
         Returns True if size is not zero.
 
@@ -134,7 +184,7 @@ class Sequence(object):
         """
         return self.size() != 0
 
-    def __getitem__(self, item):
+    def __getitem__(self, item) -> _T_co:
         """
         Gets item at given index.
 
@@ -142,9 +192,9 @@ class Sequence(object):
         :return: item at index key
         """
         self.cache()
-        return _wrap(self.sequence[item])
+        return _wrap(self.sequence[item])  # pyright: ignore[reportReturnType]
 
-    def __reversed__(self):
+    def __reversed__(self) -> Sequence[_T_co]:
         """
         Return reversed sequence using sequence's reverse function
 
@@ -152,7 +202,7 @@ class Sequence(object):
         """
         return self._transform(transformations.reversed_t())
 
-    def __contains__(self, item):
+    def __contains__(self: Sequence[_T], item: _T) -> bool:
         """
         Checks if item is in sequence.
 
@@ -161,7 +211,7 @@ class Sequence(object):
         """
         return self.sequence.__contains__(item)
 
-    def __add__(self, other):
+    def __add__(self, other: Sequence[_T]) -> Sequence[_T_co | _T]:
         """
         Concatenates sequence with other.
 
@@ -169,11 +219,12 @@ class Sequence(object):
         :return: concatenated sequence with other
         """
         if isinstance(other, Sequence):
-            return Sequence(self.sequence + other.sequence, no_wrap=self.no_wrap)
+            # pylint: disable=line-too-long
+            return Sequence(self.sequence + other.sequence, no_wrap=self.no_wrap)  # type: ignore[operator]
         else:
             return Sequence(self.sequence + other, no_wrap=self.no_wrap)
 
-    def _evaluate(self):
+    def _evaluate(self) -> Iterator[_T_co]:
         """
         Creates and returns an iterator which applies all the transformations in the lineage
 
@@ -181,22 +232,19 @@ class Sequence(object):
         """
         return self._lineage.evaluate(self._base_sequence)
 
-    def _transform(self, *transforms):
+    def _transform(self, *transforms: transformations.Transformation) -> Sequence[Any]:
         """
         Copies the given Sequence and appends new transformation
         :param transform: transform to apply or list of transforms to apply
         :return: transformed sequence
         """
-        sequence = None
+        sequence = self
         for transform in transforms:
-            if sequence:
-                sequence = Sequence(sequence, transform=transform, no_wrap=self.no_wrap)
-            else:
-                sequence = Sequence(self, transform=transform, no_wrap=self.no_wrap)
+            sequence = Sequence(sequence, transform=transform, no_wrap=self.no_wrap)
         return sequence
 
     @property
-    def sequence(self):
+    def sequence(self) -> list[_T_co]:
         """
         Alias for to_list used internally for brevity
 
@@ -204,7 +252,7 @@ class Sequence(object):
         """
         return self.to_list()
 
-    def cache(self, delete_lineage=False):
+    def cache(self, delete_lineage: bool = False) -> Self:
         """
         Caches the result of the Sequence so far. This means that any functions applied on the
         pipeline before cache() are evaluated, and the result is stored in the Sequence. This is
@@ -225,7 +273,7 @@ class Sequence(object):
             self._lineage = Lineage(engine=self.engine)
         return self
 
-    def head(self, no_wrap=None):
+    def head(self, no_wrap: bool | None = None) -> _T_co:
         """
         Returns the first element of the sequence.
 
@@ -245,9 +293,9 @@ class Sequence(object):
         if default_value(no_wrap, self.no_wrap, False):
             return self.sequence[0]
         else:
-            return _wrap(self.take(1)[0])
+            return _wrap(self.take(1)[0])  # type: ignore
 
-    def first(self, no_wrap=None):
+    def first(self, no_wrap: bool | None = None) -> _T_co:
         """
         Returns the first element of the sequence.
 
@@ -266,7 +314,7 @@ class Sequence(object):
         """
         return self.head(no_wrap=no_wrap)
 
-    def head_option(self, no_wrap=None):
+    def head_option(self, no_wrap: bool | None = None) -> _T_co | None:
         """
         Returns the first element of the sequence or None, if the sequence is empty.
 
@@ -283,7 +331,7 @@ class Sequence(object):
             return None
         return self.head(no_wrap=no_wrap)
 
-    def last(self, no_wrap=None):
+    def last(self, no_wrap: bool | None = None) -> _T_co:
         """
         Returns the last element of the sequence.
 
@@ -303,9 +351,9 @@ class Sequence(object):
         if default_value(no_wrap, self.no_wrap, False):
             return self.sequence[-1]
         else:
-            return _wrap(self.sequence[-1])
+            return _wrap(self.sequence[-1])  # type: ignore
 
-    def last_option(self, no_wrap=None):
+    def last_option(self, no_wrap: bool | None = None) -> _T_co | None:
         """
         Returns the last element of the sequence or None, if the sequence is empty.
 
@@ -322,7 +370,7 @@ class Sequence(object):
             return None
         return self.last(no_wrap=no_wrap)
 
-    def init(self):
+    def init(self) -> Sequence[_T_co]:
         """
         Returns the sequence, without its last element.
 
@@ -333,7 +381,7 @@ class Sequence(object):
         """
         return self._transform(transformations.init_t())
 
-    def tail(self):
+    def tail(self) -> Sequence[_T_co]:
         """
         Returns the sequence, without its first element.
 
@@ -344,7 +392,7 @@ class Sequence(object):
         """
         return self._transform(transformations.tail_t())
 
-    def inits(self):
+    def inits(self) -> Sequence[Self]:
         """
         Returns consecutive inits of the sequence.
 
@@ -355,7 +403,7 @@ class Sequence(object):
         """
         return self._transform(transformations.inits_t(_wrap))
 
-    def tails(self):
+    def tails(self) -> Sequence[Self]:
         """
         Returns consecutive tails of the sequence.
 
@@ -365,6 +413,66 @@ class Sequence(object):
         :return: consecutive tail()s of the sequence
         """
         return self._transform(transformations.tails_t(_wrap))
+
+    @overload
+    def cartesian(self, /) -> Sequence[tuple[_T_co]]:
+        ...
+
+    @overload
+    def cartesian(self, iter1: Iterable[_T1], /) -> Sequence[tuple[_T_co, _T1]]:
+        ...
+
+    @overload
+    def cartesian(
+        self, iter1: Iterable[_T1], iter2: Iterable[_T2], /
+    ) -> Sequence[tuple[_T_co, _T1, _T2]]:
+        ...
+
+    @overload
+    def cartesian(
+        self, iter1: Iterable[_T1], iter2: Iterable[_T2], iter3: Iterable[_T3], /
+    ) -> Sequence[tuple[_T_co, _T1, _T2, _T3]]:
+        ...
+
+    @overload
+    def cartesian(
+        self,
+        iter1: Iterable[_T1],
+        iter2: Iterable[_T2],
+        iter3: Iterable[_T3],
+        iter4: Iterable[_T4],
+        /,
+    ) -> Sequence[tuple[_T_co, _T1, _T2, _T3, _T4]]:
+        ...
+
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
+    @overload
+    def cartesian(
+        self,
+        iter1: Iterable[_T1],
+        iter2: Iterable[_T2],
+        iter3: Iterable[_T3],
+        iter4: Iterable[_T4],
+        iter5: Iterable[_T5],
+        /,
+    ) -> Sequence[tuple[_T_co, _T1, _T2, _T3, _T4, _T5]]:
+        ...
+
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
+    @overload
+    def cartesian(
+        self,
+        iter1: Iterable[_T1],
+        iter2: Iterable[_T2],
+        iter3: Iterable[_T3],
+        iter4: Iterable[_T4],
+        iter5: Iterable[_T5],
+        iter6: Iterable[_T6],
+        /,
+    ) -> Sequence[tuple[_T_co, _T1, _T2, _T3, _T4, _T5, _T6]]:
+        ...
 
     def cartesian(self, *iterables, **kwargs):
         """
@@ -384,7 +492,7 @@ class Sequence(object):
             transformations.cartesian_t(iterables, kwargs.get("repeat", 1))
         )
 
-    def drop(self, n):
+    def drop(self, n: int) -> Sequence[_T_co]:
         """
         Drop the first n elements of the sequence.
 
@@ -399,7 +507,7 @@ class Sequence(object):
         else:
             return self._transform(transformations.drop_t(n))
 
-    def drop_right(self, n):
+    def drop_right(self, n: int) -> Sequence[_T_co]:
         """
         Drops the last n elements of the sequence.
 
@@ -411,7 +519,7 @@ class Sequence(object):
         """
         return self._transform(transformations.drop_right_t(n))
 
-    def drop_while(self, func):
+    def drop_while(self, func: Callable[[_T_co], Any]) -> Sequence[_T_co]:
         """
         Drops elements in the sequence while func evaluates to True, then returns the rest.
 
@@ -423,7 +531,7 @@ class Sequence(object):
         """
         return self._transform(transformations.drop_while_t(func))
 
-    def take(self, n):
+    def take(self, n: int) -> Sequence[_T_co]:
         """
         Take the first n elements of the sequence.
 
@@ -438,7 +546,7 @@ class Sequence(object):
         else:
             return self._transform(transformations.take_t(n))
 
-    def take_while(self, func):
+    def take_while(self, func: Callable[[_T_co], Any]) -> Sequence[_T_co]:
         """
         Take elements in the sequence until func evaluates to False, then return them.
 
@@ -450,7 +558,7 @@ class Sequence(object):
         """
         return self._transform(transformations.take_while_t(func))
 
-    def union(self, other):
+    def union(self, other: Iterable[_T]) -> Sequence[_T_co | _T]:
         """
         New sequence with unique elements from self and other.
 
@@ -462,7 +570,7 @@ class Sequence(object):
         """
         return self._transform(transformations.union_t(other))
 
-    def intersection(self, other):
+    def intersection(self, other: Iterable[_T]) -> Sequence[_T_co]:
         """
         New sequence with unique elements present in sequence and other.
 
@@ -474,7 +582,7 @@ class Sequence(object):
         """
         return self._transform(transformations.intersection_t(other))
 
-    def difference(self, other):
+    def difference(self, other: Iterable[_T]) -> Sequence[_T_co]:
         """
         New sequence with unique elements present in sequence but not in other.
 
@@ -486,7 +594,7 @@ class Sequence(object):
         """
         return self._transform(transformations.difference_t(other))
 
-    def symmetric_difference(self, other):
+    def symmetric_difference(self, other: Iterable[_T]) -> Sequence[_T_co | _T]:
         """
         New sequence with elements in either sequence or other, but not both.
 
@@ -498,7 +606,7 @@ class Sequence(object):
         """
         return self._transform(transformations.symmetric_difference_t(other))
 
-    def map(self, func):
+    def map(self, func: Callable[[_T_co], _T]) -> Sequence[_T]:
         """
         Maps f onto the elements of the sequence.
 
@@ -510,7 +618,7 @@ class Sequence(object):
         """
         return self._transform(transformations.map_t(func))
 
-    def select(self, func):
+    def select(self, func: Callable[[_T_co], _T]) -> Sequence[_T]:
         """
         Selects f from the elements of the sequence.
 
@@ -521,6 +629,40 @@ class Sequence(object):
         :return: sequence with func mapped onto it
         """
         return self._transform(transformations.select_t(func))
+
+    @overload
+    def starmap(self: Sequence[tuple[_T1]], func: Callable[[_T1], _R]) -> Sequence[_R]:
+        ...
+
+    @overload
+    def starmap(
+        self: Sequence[tuple[_T1, _T2]], func: Callable[[_T1, _T2], _R]
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def starmap(
+        self: Sequence[tuple[_T1, _T2, _T3]], func: Callable[[_T1, _T2, _T3], _R]
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def starmap(
+        self: Sequence[tuple[_T1, _T2, _T3, _T4]],
+        func: Callable[[_T1, _T2, _T3, _T4], _R],
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def starmap(
+        self: Sequence[tuple[_T1, _T2, _T3, _T4, _T5]],
+        func: Callable[[_T1, _T2, _T3, _T4, _T5], _R],
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def starmap(self, func: Callable[..., _R]) -> Sequence[_R]:
+        ...
 
     def starmap(self, func):
         """
@@ -533,6 +675,40 @@ class Sequence(object):
         :return: sequence with func starmapped onto it
         """
         return self._transform(transformations.starmap_t(func))
+
+    @overload
+    def smap(self: Sequence[tuple[_T1]], func: Callable[[_T1], _R]) -> Sequence[_R]:
+        ...
+
+    @overload
+    def smap(
+        self: Sequence[tuple[_T1, _T2]], func: Callable[[_T1, _T2], _R]
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def smap(
+        self: Sequence[tuple[_T1, _T2, _T3]], func: Callable[[_T1, _T2, _T3], _R]
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def smap(
+        self: Sequence[tuple[_T1, _T2, _T3, _T4]],
+        func: Callable[[_T1, _T2, _T3, _T4], _R],
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def smap(
+        self: Sequence[tuple[_T1, _T2, _T3, _T4, _T5]],
+        func: Callable[[_T1, _T2, _T3, _T4, _T5], _R],
+    ) -> Sequence[_R]:
+        ...
+
+    @overload
+    def smap(self, func: Callable[..., _R]) -> Sequence[_R]:
+        ...
 
     def smap(self, func):
         """
@@ -548,7 +724,7 @@ class Sequence(object):
         """
         return self._transform(transformations.starmap_t(func))
 
-    def for_each(self, func):
+    def for_each(self, func: Callable[[_T_co], Any]) -> None:
         """
         Executes func on each element of the sequence.
 
@@ -562,7 +738,7 @@ class Sequence(object):
         for e in self:
             func(e)
 
-    def peek(self, func):
+    def peek(self, func: Callable[[_T_co], Any]) -> Sequence[_T_co]:
         """
         Executes func on each element of the sequence and returns the element
 
@@ -577,6 +753,23 @@ class Sequence(object):
         """
         return self._transform(transformations.peek_t(func))
 
+    def remove_none(self: Sequence[_T | None]) -> Sequence[_T]:
+        """
+        Removes all `None` values from the sequence.
+
+        Returns:
+            A new sequence with all `None` values removed.
+        """
+        return self.filter(lambda x: x is not None)  # type: ignore
+
+    @overload
+    def filter(self, func: Callable[[_T_co], TypeGuard[_T]]) -> Sequence[_T]:
+        ...
+
+    @overload
+    def filter(self, func: Callable[[_T_co], Any]) -> Sequence[_T_co]:
+        ...
+
     def filter(self, func):
         """
         Filters sequence to include only elements where func is True.
@@ -589,7 +782,7 @@ class Sequence(object):
         """
         return self._transform(transformations.filter_t(func))
 
-    def filter_not(self, func):
+    def filter_not(self, func: Callable[[_T_co], Any]) -> Sequence[_T_co]:
         """
         Filters sequence to include only elements where func is False.
 
@@ -601,7 +794,7 @@ class Sequence(object):
         """
         return self._transform(transformations.filter_not_t(func))
 
-    def where(self, func):
+    def where(self, func: Callable[[_T_co], Any]) -> Sequence[_T_co]:
         """
         Selects elements where func evaluates to True.
 
@@ -613,7 +806,7 @@ class Sequence(object):
         """
         return self._transform(transformations.where_t(func))
 
-    def count(self, func):
+    def count(self, func: Callable[[_T_co], Any]) -> int:
         """
         Counts the number of elements in the sequence which satisfy the predicate func.
 
@@ -623,13 +816,9 @@ class Sequence(object):
         :param func: predicate to count elements on
         :return: count of elements that satisfy predicate
         """
-        n = 0
-        for element in self:
-            if func(element):
-                n += 1
-        return n
+        return sum(bool(func(element)) for element in self)
 
-    def len(self):
+    def len(self) -> int:
         """
         Return length of sequence using its length function.
 
@@ -639,9 +828,9 @@ class Sequence(object):
         :return: length of sequence
         """
         self.cache()
-        return len(self._base_sequence)
+        return len(self._base_sequence)  # type: ignore
 
-    def size(self):
+    def size(self) -> int:
         """
         Return size of sequence using its length function.
 
@@ -649,7 +838,7 @@ class Sequence(object):
         """
         return self.len()
 
-    def empty(self):
+    def empty(self) -> bool:
         """
         Returns True if the sequence has length zero.
 
@@ -663,7 +852,7 @@ class Sequence(object):
         """
         return self.size() == 0
 
-    def non_empty(self):
+    def non_empty(self) -> bool:
         """
         Returns True if the sequence does not have length zero.
 
@@ -677,7 +866,7 @@ class Sequence(object):
         """
         return self.size() != 0
 
-    def any(self):
+    def any(self) -> bool:
         """
         Returns True if any element in the sequence has truth value True
 
@@ -691,7 +880,7 @@ class Sequence(object):
         """
         return any(self)
 
-    def all(self):
+    def all(self) -> bool:
         """
         Returns True if the truth value of all items in the sequence true.
 
@@ -705,7 +894,7 @@ class Sequence(object):
         """
         return all(self)
 
-    def exists(self, func):
+    def exists(self, func: Callable[[_T_co], Any]) -> bool:
         """
         Returns True if an element in the sequence makes func evaluate to True.
 
@@ -718,12 +907,9 @@ class Sequence(object):
         :param func: existence check function
         :return: True if any element satisfies func
         """
-        for element in self:
-            if func(element):
-                return True
-        return False
+        return any(func(element) for element in self)
 
-    def for_all(self, func):
+    def for_all(self, func: Callable[[_T_co], Any]) -> bool:
         """
         Returns True if all elements in sequence make func evaluate to True.
 
@@ -736,12 +922,9 @@ class Sequence(object):
         :param func: function to check truth value of all elements with
         :return: True if all elements make func evaluate to True
         """
-        for element in self:
-            if not func(element):
-                return False
-        return True
+        return all(func(element) for element in self)
 
-    def max(self):
+    def max(self: Sequence[SupportsRichComparisonT]) -> SupportsRichComparisonT:
         """
         Returns the largest element in the sequence.
         If the sequence has multiple maximal elements, only the first one is returned.
@@ -770,9 +953,9 @@ class Sequence(object):
 
         :return: Maximal value of sequence
         """
-        return _wrap(max(self))
+        return _wrap(max(self))  # type: ignore
 
-    def min(self):
+    def min(self: Sequence[SupportsRichComparisonT]) -> SupportsRichComparisonT:
         """
         Returns the smallest element in the sequence.
         If the sequence has multiple minimal elements, only the first one is returned.
@@ -801,9 +984,9 @@ class Sequence(object):
 
         :return: Minimal value of sequence
         """
-        return _wrap(min(self))
+        return _wrap(min(self))  # type: ignore
 
-    def max_by(self, func):
+    def max_by(self, func: Callable[[_T_co], SupportsRichComparison]) -> _T_co:
         """
         Returns the largest element in the sequence.
         Provided function is used to generate key used to compare the elements.
@@ -826,9 +1009,9 @@ class Sequence(object):
         :param func: function to compute max by
         :return: Maximal element by func(element)
         """
-        return _wrap(max(self, key=func))
+        return _wrap(max(self, key=func))  # type: ignore
 
-    def min_by(self, func):
+    def min_by(self, func: Callable[[_T_co], SupportsRichComparison]) -> _T_co:
         """
         Returns the smallest element in the sequence.
         Provided function is used to generate key used to compare the elements.
@@ -851,9 +1034,9 @@ class Sequence(object):
         :param func: function to compute min by
         :return: Maximal element by func(element)
         """
-        return _wrap(min(self, key=func))
+        return _wrap(min(self, key=func))  # type: ignore
 
-    def find(self, func):
+    def find(self, func: Callable[[_T_co], Any]) -> _T_co | None:
         """
         Finds the first element of the sequence that satisfies func. If no such element exists,
         then return None.
@@ -864,12 +1047,9 @@ class Sequence(object):
         :param func: function to find with
         :return: first element to satisfy func or None
         """
-        for element in self:
-            if func(element):
-                return element
-        return None
+        return next((element for element in self if func(element)), None)
 
-    def flatten(self):
+    def flatten(self: Sequence[Iterable[_T]]) -> Sequence[_T]:
         """
         Flattens a sequence of sequences to a single sequence of elements.
 
@@ -880,7 +1060,7 @@ class Sequence(object):
         """
         return self._transform(transformations.flatten_t())
 
-    def flat_map(self, func):
+    def flat_map(self, func: Callable[[_T_co], Iterable[_T]]) -> Sequence[_T]:
         """
         Applies func to each element of the sequence, which themselves should be sequences.
         Then appends each element of each sequence to a final result
@@ -899,7 +1079,9 @@ class Sequence(object):
         """
         return self._transform(transformations.flat_map_t(func))
 
-    def group_by(self, func):
+    def group_by(
+        self, func: Callable[[_T_co], _T]
+    ) -> Sequence[tuple[_T, Sequence[_T_co]]]:
         """
         Group elements into a list of (Key, Value) tuples where func creates the key and maps
         to values matching that key.
@@ -912,6 +1094,18 @@ class Sequence(object):
         """
         return self._transform(transformations.group_by_t(func))
 
+    @overload
+    def group_by_key(
+        self: Sequence[tuple[_U, _V]],
+    ) -> Sequence[tuple[_U, list[_V]]]:
+        ...
+
+    @overload
+    def group_by_key(
+        self: Sequence[Iterable[_U]],
+    ) -> Sequence[tuple[_U, list[_U]]]:
+        ...
+
     def group_by_key(self):
         """
         Group sequence of (Key, Value) elements by Key.
@@ -923,7 +1117,10 @@ class Sequence(object):
         """
         return self._transform(transformations.group_by_key_t())
 
-    def reduce_by_key(self, func):
+    def reduce_by_key(
+        self: Sequence[tuple[_U, _V]],
+        func: Callable[[_V, _V], _R],
+    ) -> Sequence[tuple[_U, _R]]:  # ...
         """
         Reduces a sequence of (Key, Value) using func on each sequence of values.
 
@@ -936,7 +1133,7 @@ class Sequence(object):
         """
         return self._transform(transformations.reduce_by_key_t(func))
 
-    def count_by_key(self):
+    def count_by_key(self: Sequence[tuple[_T, Any]]) -> Sequence[tuple[_T, int]]:
         """
         Reduces a sequence of (Key, Value) by counting each key
 
@@ -946,7 +1143,7 @@ class Sequence(object):
         """
         return self._transform(transformations.count_by_key_t())
 
-    def count_by_value(self):
+    def count_by_value(self) -> Sequence[tuple[_T_co, int]]:
         """
         Reduces a sequence of items by counting each unique item
 
@@ -955,6 +1152,14 @@ class Sequence(object):
         :return: Sequence of tuples where value is the count of each key
         """
         return self._transform(transformations.count_by_value_t())
+
+    @overload
+    def reduce(self, function: Callable[[_P, _T_co], _P], initial: _P, /) -> _P:
+        ...
+
+    @overload
+    def reduce(self, func: Callable[[_T_co, _T_co], _T_co], /) -> _T_co:
+        ...
 
     def reduce(self, func, *initial):
         """
@@ -968,7 +1173,7 @@ class Sequence(object):
         :return: reduced value using func
         """
         if len(initial) == 0:
-            return _wrap(reduce(func, self))
+            return _wrap(reduce(func, self))  # type: ignore
         elif len(initial) == 1:
             return _wrap(reduce(func, self, initial[0]))
         else:
@@ -976,7 +1181,9 @@ class Sequence(object):
                 "reduce takes exactly one optional parameter for initial value"
             )
 
-    def accumulate(self, func=add):
+    def accumulate(
+        self, func: Callable[[_T_co, _T_co], _T_co] = add
+    ) -> Sequence[_T_co]:
         """
         Accumulate sequence of elements using func. API mirrors itertools.accumulate
 
@@ -991,7 +1198,7 @@ class Sequence(object):
         """
         return self._transform(transformations.accumulate_t(func))
 
-    def make_string(self, separator):
+    def make_string(self, separator: str) -> str:
         """
         Concatenate the elements of the sequence into a string separated by separator.
 
@@ -1003,7 +1210,7 @@ class Sequence(object):
         """
         return separator.join(str(e) for e in self)
 
-    def product(self, projection=None):
+    def product(self, projection: Callable[[_T_co], float] | None = None) -> float:
         """
         Takes product of elements in sequence.
 
@@ -1021,21 +1228,21 @@ class Sequence(object):
         """
         if self.empty():
             if projection:
-                return projection(1)
+                return projection(1)  # type: ignore
             else:
                 return 1
         if self.size() == 1:
             if projection:
                 return projection(self.first())
             else:
-                return self.first()
+                return self.first()  # type: ignore
 
         if projection:
             return self.map(projection).reduce(mul)
         else:
-            return self.reduce(mul)
+            return self.reduce(mul)  # type: ignore
 
-    def sum(self, projection=None):
+    def sum(self, projection: Callable[[_T_co], float] | None = None) -> float:
         """
         Takes sum of elements in sequence.
 
@@ -1051,9 +1258,9 @@ class Sequence(object):
         if projection:
             return sum(self.map(projection))
         else:
-            return sum(self)
+            return sum(self)  # type: ignore
 
-    def average(self, projection=None):
+    def average(self, projection: Callable[[_T_co], float] | None = None) -> float:
         """
         Takes the average of elements in the sequence
 
@@ -1069,7 +1276,25 @@ class Sequence(object):
         if projection:
             return sum(self.map(projection)) / length
         else:
-            return sum(self) / length
+            return sum(self) / length  # type: ignore
+
+    @overload
+    def aggregate(self, func: Callable[[Sequence[_T], _T], _T], /) -> _T:
+        ...
+
+    @overload
+    def aggregate(self, seed: _T, func: Callable[[_T, _T], _T], /) -> _T:
+        ...
+
+    @overload
+    def aggregate(
+        self,
+        seed: _T,
+        func: Callable[[_T, _T], _T],
+        result_map: Callable[[_T], _R],
+        /,
+    ) -> _R:
+        ...
 
     def aggregate(self, *args):
         """
@@ -1102,15 +1327,13 @@ class Sequence(object):
             func = args[1]
             result_lambda = args[2]
         else:
-            raise ValueError(
-                "aggregate takes 1-3 arguments, {0} were given".format(len(args))
-            )
+            raise ValueError(f"aggregate takes 1-3 arguments, {len(args)} were given")
         if len(args) == 1:
             return result_lambda(self.drop(1).fold_left(self.first(), func))
         else:
             return result_lambda(self.fold_left(seed, func))
 
-    def fold_left(self, zero_value, func):
+    def fold_left(self, zero_value: _P, func: Callable[[_P, _T_co], _P]) -> _P:
         """
         Assuming that the sequence elements are of type A, folds from left to right starting with
         the seed value given by zero_value (of type A) using a function of type
@@ -1127,9 +1350,9 @@ class Sequence(object):
         result = zero_value
         for element in self:
             result = func(result, element)
-        return _wrap(result)
+        return _wrap(result)  # type: ignore
 
-    def fold_right(self, zero_value, func):
+    def fold_right(self, zero_value: _T, func: Callable[[_T_co, _T], _T]) -> _T:
         """
         Assuming that the sequence elements are of type A, folds from right to left starting with
         the seed value given by zero_value (of type A) using a function of type
@@ -1146,9 +1369,9 @@ class Sequence(object):
         result = zero_value
         for element in self.reverse():
             result = func(element, result)
-        return _wrap(result)
+        return _wrap(result)  # type: ignore
 
-    def zip(self, sequence):
+    def zip(self, sequence: Iterable[_T]) -> Sequence[tuple[_T_co, _T]]:
         """
         Zips the stored sequence with the given sequence.
 
@@ -1160,7 +1383,7 @@ class Sequence(object):
         """
         return self._transform(transformations.zip_t(sequence))
 
-    def zip_with_index(self, start=0):
+    def zip_with_index(self, start: int = 0) -> Sequence[tuple[_T_co, int]]:
         """
         Zips the sequence to its index, with the index being the second element of each tuple.
 
@@ -1171,7 +1394,7 @@ class Sequence(object):
         """
         return self._transform(transformations.zip_with_index_t(start))
 
-    def enumerate(self, start=0):
+    def enumerate(self, start: int = 0) -> Sequence[tuple[int, _T_co]]:
         """
         Uses python enumerate to to zip the sequence with indexes starting at start.
 
@@ -1270,7 +1493,9 @@ class Sequence(object):
         """
         return self.join(other, "outer")
 
-    def partition(self, func):
+    def partition(
+        self, func: Callable[[_T_co], Any]
+    ) -> tuple[Sequence[_T_co], Sequence[_T_co]]:
         """
         Partition the sequence based on satisfying the predicate func.
 
@@ -1280,9 +1505,9 @@ class Sequence(object):
         :param func: predicate to partition on
         :return: tuple of partitioned sequences
         """
-        return self._transform(transformations.partition_t(_wrap, func))
+        return self._transform(transformations.partition_t(_wrap, func))  # type: ignore
 
-    def grouped(self, size):
+    def grouped(self, size: int) -> Sequence[Self]:
         """
         Partitions the elements into groups of length size.
 
@@ -1299,7 +1524,7 @@ class Sequence(object):
         """
         return self._transform(transformations.grouped_t(size))
 
-    def sliding(self, size, step=1):
+    def sliding(self, size: int, step: int = 1) -> Sequence[Self]:
         """
         Groups elements in fixed size blocks by passing a sliding window over them.
 
@@ -1311,7 +1536,11 @@ class Sequence(object):
         """
         return self._transform(transformations.sliding_t(_wrap, size, step))
 
-    def sorted(self, key=None, reverse=False):
+    def sorted(
+        self,
+        key: Callable[[_T_co], SupportsRichComparison] | None = None,
+        reverse: bool = False,
+    ) -> Sequence[_T_co]:
         """
         Uses python sort and its passed arguments to sort the input.
 
@@ -1324,19 +1553,21 @@ class Sequence(object):
         """
         return self._transform(transformations.sorted_t(key=key, reverse=reverse))
 
-    def order_by(self, func):
+    def order_by(
+        self, func: Callable[[_T_co], SupportsRichComparison]
+    ) -> Sequence[_T_co]:
         """
         Orders the input according to func
 
         >>> seq([(2, 'a'), (1, 'b'), (4, 'c'), (3, 'd')]).order_by(lambda x: x[0])
         [1, 2, 3, 4]
 
-        :param func: order by funciton
+        :param func: order by function
         :return: ordered sequence
         """
         return self._transform(transformations.order_by_t(func))
 
-    def reverse(self):
+    def reverse(self) -> Sequence[_T_co]:
         """
         Returns the reversed sequence.
 
@@ -1345,9 +1576,9 @@ class Sequence(object):
 
         :return: reversed sequence
         """
-        return reversed(self)
+        return reversed(self)  # type: ignore
 
-    def distinct(self):
+    def distinct(self) -> Sequence[_T_co]:
         """
         Returns sequence of distinct elements. Elements must be hashable.
 
@@ -1358,7 +1589,7 @@ class Sequence(object):
         """
         return self._transform(transformations.distinct_t())
 
-    def distinct_by(self, func):
+    def distinct_by(self, func: Callable[[_T_co], Hashable]) -> Sequence[_T_co]:
         """
         Returns sequence of elements who are distinct by the passed function. The return
         value of func must be hashable. When two elements are distinct by func, the first is taken.
@@ -1368,7 +1599,7 @@ class Sequence(object):
         """
         return self._transform(transformations.distinct_by_t(func))
 
-    def slice(self, start, until):
+    def slice(self, start: int, until: int) -> Sequence[_T_co]:
         """
         Takes a slice of the sequence starting at start and until but not including until.
 
@@ -1383,7 +1614,7 @@ class Sequence(object):
         """
         return self._transform(transformations.slice_t(start, until))
 
-    def to_list(self, n=None):
+    def to_list(self, n: int | None = None) -> list[_T_co]:
         """
         Converts sequence to list of elements.
 
@@ -1401,11 +1632,11 @@ class Sequence(object):
         """
         if n is None:
             self.cache()
-            return self._base_sequence
+            return self._base_sequence  # type: ignore
         else:
             return self.cache().take(n).list()
 
-    def list(self, n=None):
+    def list(self, n: int | None = None) -> list[_T_co]:
         """
         Converts sequence to list of elements.
 
@@ -1423,7 +1654,7 @@ class Sequence(object):
         """
         return self.to_list(n=n)
 
-    def to_set(self):
+    def to_set(self) -> set[_T_co]:
         """
         Converts sequence to a set of elements.
 
@@ -1440,7 +1671,7 @@ class Sequence(object):
         """
         return set(self.sequence)
 
-    def set(self):
+    def set(self) -> set[_T_co]:
         """
         Converts sequence to a set of elements.
 
@@ -1457,7 +1688,23 @@ class Sequence(object):
         """
         return self.to_set()
 
-    def to_dict(self, default=None):
+    @overload
+    def to_dict(self: Sequence[tuple[_K, _V]]) -> dict[_K, _V]:
+        ...
+
+    @overload
+    def to_dict(
+        self: Sequence[tuple[_K, _V]], default: Callable[[], _V]
+    ) -> collections.defaultdict[_K, _V]:
+        ...
+
+    @overload
+    def to_dict(
+        self: Sequence[tuple[_K, _V]], default: _V
+    ) -> collections.defaultdict[_K, _V]:
+        ...
+
+    def to_dict(self, default=None):  # pyright: ignore[reportInconsistentOverload]
         """
         Converts sequence of (Key, Value) pairs to a dictionary.
 
@@ -1473,9 +1720,7 @@ class Sequence(object):
             value and used for collections.defaultdict
         :return: dictionary from sequence of (Key, Value) elements
         """
-        dictionary = {}
-        for e in self.sequence:
-            dictionary[e[0]] = e[1]
+        dictionary = dict(self.sequence)  # type: ignore
         if default is None:
             return dictionary
         else:
@@ -1484,7 +1729,23 @@ class Sequence(object):
             else:
                 return collections.defaultdict(lambda: default, dictionary)
 
-    def dict(self, default=None):
+    @overload
+    def dict(self: Sequence[tuple[_K, _V]]) -> dict[_K, _V]:
+        ...
+
+    @overload
+    def dict(
+        self: Sequence[tuple[_K, _V]], default: Callable[[], _V]
+    ) -> collections.defaultdict[_K, _V]:
+        ...
+
+    @overload
+    def dict(
+        self: Sequence[tuple[_K, _V]], default: _V
+    ) -> collections.defaultdict[_K, _V]:
+        ...
+
+    def dict(self, default=None):  # pyright: ignore[reportInconsistentOverload]
         """
         Converts sequence of (Key, Value) pairs to a dictionary.
 
@@ -1500,25 +1761,27 @@ class Sequence(object):
             value and used for collections.defaultdict
         :return: dictionary from sequence of (Key, Value) elements
         """
-        return self.to_dict(default=default)
+        return self.to_dict(default=default)  # type: ignore
 
     # pylint: disable=too-many-locals
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     def to_file(
         self,
-        path,
-        delimiter=None,
-        mode="wt",
-        buffering=-1,
-        encoding=None,
-        errors=None,
-        newline=None,
-        compresslevel=9,
-        format=None,
-        check=-1,
-        preset=None,
-        filters=None,
-        compression=None,
-    ):
+        path: str,
+        delimiter: str | None = None,
+        mode: str = "wt",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        compresslevel: int = 9,
+        format: int | None = None,
+        check: int = -1,
+        preset: int | None = None,
+        filters: _FilterChain | None = None,
+        compression: str | None = None,
+    ) -> None:
         """
         Saves the sequence to a file by executing str(self) which becomes str(self.to_list()). If
         delimiter is defined will instead execute self.make_string(delimiter)
@@ -1552,11 +1815,13 @@ class Sequence(object):
             filters=filters,
         ) as output:
             if delimiter:
-                output.write(self.make_string(delimiter))
+                output.write(self.make_string(delimiter))  # type: ignore
             else:
-                output.write(str(self))
+                output.write(str(self))  # type: ignore
 
-    def to_jsonl(self, path, mode="wb", compression=None):
+    def to_jsonl(
+        self, path: str, mode: str = "wb", compression: str | None = None
+    ) -> None:
         """
         Saves the sequence to a jsonl file. Each element is mapped using json.dumps then written
         with a newline separating each element.
@@ -1567,10 +1832,18 @@ class Sequence(object):
         """
         with universal_write_open(path, mode=mode, compression=compression) as output:
             output.write(
-                (self.map(json.dumps).make_string("\n") + "\n").encode("utf-8")
+                (self.map(json.dumps).make_string("\n") + "\n").encode(
+                    "utf-8"
+                )  # pyright: ignore[reportCallIssue,reportArgumentType]
             )
 
-    def to_json(self, path, root_array=True, mode=WRITE_MODE, compression=None):
+    def to_json(
+        self,
+        path: str,
+        root_array: bool = True,
+        mode: str = WRITE_MODE,
+        compression: str | None = None,
+    ) -> None:
         """
         Saves the sequence to a json file. If root_array is True, then the sequence will be written
         to json with an array at the root. If it is False, then the sequence will be converted from
@@ -1582,19 +1855,19 @@ class Sequence(object):
         """
         with universal_write_open(path, mode=mode, compression=compression) as output:
             if root_array:
-                json.dump(self.to_list(), output)
+                json.dump(self.to_list(), output)  # type: ignore
             else:
-                json.dump(self.to_dict(), output)
+                json.dump(self.to_dict(), output)  # type: ignore
 
     def to_csv(
         self,
-        path,
-        mode=WRITE_MODE,
-        dialect="excel",
-        compression=None,
-        newline="",
-        **fmtparams
-    ):
+        path: str,
+        mode: str = WRITE_MODE,
+        dialect: str = "excel",
+        compression: str | None = None,
+        newline: str | None = "",
+        **fmtparams,
+    ) -> None:
         """
         Saves the sequence to a csv file. Each element should be an iterable which will be expanded
         to the elements of each row.
@@ -1611,11 +1884,13 @@ class Sequence(object):
         with universal_write_open(
             path, mode=mode, compression=compression, newline=newline
         ) as output:
-            csv_writer = csv.writer(output, dialect=dialect, **fmtparams)
+            csv_writer = csv.writer(output, dialect=dialect, **fmtparams)  # type: ignore
             for row in self:
-                csv_writer.writerow([str(element) for element in row])
+                csv_writer.writerow([str(element) for element in row])  # type: ignore
 
-    def _to_sqlite3_by_query(self, conn, sql):
+    def _to_sqlite3_by_query(
+        self, conn: sqlite3.Connection | sqlite3.Cursor, sql
+    ) -> None:
         """
         Saves the sequence to sqlite3 database by supplied query.
         Each element should be an iterable which will be expanded
@@ -1624,9 +1899,11 @@ class Sequence(object):
         :param conn: path or sqlite connection, cursor
         :param sql: SQL query string
         """
-        conn.executemany(sql, self)
+        conn.executemany(sql, self)  # type: ignore
 
-    def _to_sqlite3_by_table(self, conn, table_name):
+    def _to_sqlite3_by_table(
+        self, conn: sqlite3.Connection | sqlite3.Cursor, table_name: str
+    ) -> None:
         """
         Saves the sequence to the specified table of sqlite3 database.
         Each element can be a dictionary, namedtuple, tuple or list.
@@ -1640,31 +1917,31 @@ class Sequence(object):
             if isinstance(item, dict):
                 cols = ", ".join(item.keys())
                 placeholders = ", ".join("?" * len(item))
-                sql = "INSERT INTO {} ({}) VALUES ({})".format(
-                    table_name, cols, placeholders
-                )
+                sql = f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})"
                 conn.execute(sql, tuple(item.values()))
             elif is_namedtuple(item):
                 cols = ", ".join(item._fields)
                 placeholders = ", ".join("?" * len(item))
-                sql = "INSERT INTO {} ({}) VALUES ({})".format(
-                    table_name, cols, placeholders
-                )
+                sql = f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})"
                 conn.execute(sql, item)
             elif isinstance(item, (list, tuple)):
                 placeholders = ", ".join("?" * len(item))
-                sql = "INSERT INTO {} VALUES ({})".format(table_name, placeholders)
+                sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
                 conn.execute(sql, item)
             else:
                 raise TypeError(
-                    "item must be one of dict, namedtuple, tuple or list got {}".format(
-                        type(item)
-                    )
+                    f"item must be one of dict, namedtuple, tuple or list got {type(item)}"
                 )
 
         self.for_each(_insert_item)
 
-    def to_sqlite3(self, conn, target, *args, **kwargs):
+    def to_sqlite3(
+        self,
+        conn: sqlite3.Connection | sqlite3.Cursor | str,
+        target: str,
+        *args,
+        **kwargs,
+    ) -> None:
         """
         Saves the sequence to sqlite3 database.
         Target table must be created in advance.
@@ -1686,11 +1963,11 @@ class Sequence(object):
         if insert_regex.match(target):
             insert_f = self._to_sqlite3_by_query
         else:
-            insert_f = self._to_sqlite3_by_table
+            insert_f = self._to_sqlite3_by_table  # type:ignore[assignment]
 
         if isinstance(conn, (sqlite3.Connection, sqlite3.Cursor)):
             insert_f(conn, target)
-            conn.commit()
+            conn.commit()  # type: ignore
         elif isinstance(conn, str):
             with sqlite3.connect(conn, *args, **kwargs) as input_conn:
                 insert_f(input_conn, target)
@@ -1700,7 +1977,7 @@ class Sequence(object):
                 "conn must be a must be a file path or sqlite3 Connection/Cursor"
             )
 
-    def to_pandas(self, columns=None):
+    def to_pandas(self, columns: tuple[str, ...] | None = None) -> DataFrame:
         # pylint: disable=import-error
         """
         Converts sequence to a pandas DataFrame using pandas.DataFrame.from_records
@@ -1714,14 +1991,14 @@ class Sequence(object):
 
     def show(
         self,
-        n=10,
-        headers=(),
-        tablefmt="simple",
-        floatfmt="g",
-        numalign="decimal",
-        stralign="left",
-        missingval="",
-    ):
+        n: int = 10,
+        headers: typing.Sequence[str] = (),
+        tablefmt: str = "simple",
+        floatfmt: str = "g",
+        numalign: str = "decimal",
+        stralign: str = "left",
+        missingval: str = "",
+    ) -> None:
         """
         Pretty print first n rows of sequence as a table. See
         https://bitbucket.org/astanin/python-tabulate for details on tabulate parameters
@@ -1745,7 +2022,7 @@ class Sequence(object):
         )
         print(formatted_seq)
 
-    def _repr_html_(self):
+    def _repr_html_(self) -> str | None:
         """
         Allows  IPython render HTML tables
         :return: First 10 rows of data as an HTML table
@@ -1754,14 +2031,14 @@ class Sequence(object):
 
     def tabulate(
         self,
-        n=None,
-        headers=(),
-        tablefmt="simple",
-        floatfmt="g",
-        numalign="decimal",
-        stralign="left",
-        missingval="",
-    ):
+        n: int | None = None,
+        headers: typing.Sequence[str] = (),
+        tablefmt: str = "simple",
+        floatfmt: str = "g",
+        numalign: str = "decimal",
+        stralign: str = "left",
+        missingval: str = "",
+    ) -> str | None:
         """
         Return pretty string table of first n rows of sequence or everything if n is None. See
         https://bitbucket.org/astanin/python-tabulate for details on tabulate parameters
@@ -1785,16 +2062,16 @@ class Sequence(object):
         else:
             rows = self.take(n).list()
             if tablefmt == "simple":
-                message = "\nShowing {} of {} rows".format(n, length)
+                message = f"\nShowing {n} of {length} rows"
             elif tablefmt == "html":
-                message = "<p>Showing {} of {} rows".format(n, length)
+                message = f"<p>Showing {n} of {length} rows"
             else:
                 message = ""
         if len(headers) == 0 and is_namedtuple(rows[0]):
             headers = rows[0]._fields
         return (
             tabulate(
-                rows,
+                rows,  # type: ignore
                 headers=headers,
                 tablefmt=tablefmt,
                 floatfmt=floatfmt,
@@ -1804,6 +2081,37 @@ class Sequence(object):
             )
             + message
         )
+
+
+_PrimitiveT = TypeVar("_PrimitiveT", str, bool, float, complex, bytes, int)
+_NamedTupleT = TypeVar("_NamedTupleT", bound=NamedTuple)
+_DictT = TypeVar("_DictT", bound=dict)
+_SetT = TypeVar("_SetT", bound=set)
+
+
+@overload
+def _wrap(value: _PrimitiveT) -> _PrimitiveT:
+    ...
+
+
+@overload
+def _wrap(value: _DictT) -> _DictT:  # type: ignore
+    ...
+
+
+@overload
+def _wrap(value: _SetT) -> _SetT:  # type: ignore
+    ...
+
+
+@overload
+def _wrap(value: _NamedTupleT) -> _NamedTupleT:  # type: ignore
+    ...
+
+
+@overload
+def _wrap(value: Iterable[_T]) -> Sequence[_T]:
+    ...
 
 
 def _wrap(value):
@@ -1827,7 +2135,7 @@ def _wrap(value):
         return value
     if isinstance(value, (dict, set)) or is_namedtuple(value):
         return value
-    elif isinstance(value, collections.abc.Iterable):
+    elif isinstance(value, collections.abc.Iterable):  # type: ignore
         try:
             if type(value).__name__ == "DataFrame":
                 import pandas
@@ -1882,6 +2190,7 @@ def extend(func=None, aslist=False, final=False, name=None, parallel=False):
     """
     if func is None:
         return partial(extend, aslist=aslist, final=final, name=name, parallel=parallel)
+    assert func is not None  # this is for mypy
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -1897,7 +2206,7 @@ def extend(func=None, aslist=False, final=False, name=None, parallel=False):
             func_ = lambda seq: func(seq, *args, **kwargs)
 
         transform = transformations.Transformation(
-            "extended[{}]".format(name or func.__name__),
+            f"extended[{name or func.__name__}]",
             func_,
             {ExecutionStrategies.PARALLEL} if parallel else None,
         )

@@ -1,14 +1,19 @@
+from __future__ import annotations
 import gzip
 import lzma
 import bz2
 import io
 import builtins
 
+from typing import Generic, TypeVar, Any
+
 
 WRITE_MODE = "wt"
 
+_FileConv_co = TypeVar("_FileConv_co", covariant=True)
 
-class ReusableFile(object):
+
+class ReusableFile(Generic[_FileConv_co]):
     """
     Class which emulates the builtin file except that calling iter() on it will return separate
     iterators on different file handlers (which are automatically closed when iteration stops). This
@@ -16,16 +21,18 @@ class ReusableFile(object):
     lazy.
     """
 
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
-        path,
-        delimiter=None,
-        mode="r",
-        buffering=-1,
-        encoding=None,
-        errors=None,
-        newline=None,
+        path: str,
+        delimiter: str | None = None,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
     ):
         """
         Constructor arguments are passed directly to builtins.open
@@ -61,8 +68,7 @@ class ReusableFile(object):
             errors=self.errors,
             newline=self.newline,
         ) as file_content:
-            for line in file_content:
-                yield line
+            yield from file_content
 
     def read(self):
         # pylint: disable=no-member
@@ -78,19 +84,21 @@ class ReusableFile(object):
 
 
 class CompressedFile(ReusableFile):
-    magic_bytes = None
+    magic_bytes: bytes | None = None
 
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
-        path,
-        delimiter=None,
-        mode="rt",
-        buffering=-1,
-        compresslevel=9,
-        encoding=None,
-        errors=None,
-        newline=None,
+        path: str,
+        delimiter: str | None = None,
+        mode: str = "rt",
+        buffering: int = -1,
+        compresslevel: int = 9,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
     ):
         super(CompressedFile, self).__init__(
             path,
@@ -109,19 +117,21 @@ class CompressedFile(ReusableFile):
 
 
 class GZFile(CompressedFile):
-    magic_bytes = b"\x1f\x8b\x08"
+    magic_bytes: bytes = b"\x1f\x8b\x08"
 
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
-        path,
-        delimiter=None,
-        mode="rt",
-        buffering=-1,
-        compresslevel=9,
-        encoding=None,
-        errors=None,
-        newline=None,
+        path: str,
+        delimiter: str | None = None,
+        mode: str = "rt",
+        buffering: int = -1,
+        compresslevel: int = 9,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
     ):
         super(GZFile, self).__init__(
             path,
@@ -144,14 +154,12 @@ class GZFile(CompressedFile):
                     errors=self.errors,
                     newline=self.newline,
                 ) as file_content:
-                    for line in file_content:
-                        yield line
+                    yield from file_content
         else:
             with gzip.open(
                 self.path, mode=self.mode, compresslevel=self.compresslevel
             ) as file_content:
-                for line in file_content:
-                    yield line
+                yield from file_content
 
     def read(self):
         with gzip.GzipFile(self.path, compresslevel=self.compresslevel) as gz_file:
@@ -166,19 +174,21 @@ class GZFile(CompressedFile):
 
 
 class BZ2File(CompressedFile):
-    magic_bytes = b"\x42\x5a\x68"
+    magic_bytes: bytes = b"\x42\x5a\x68"
 
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
-        path,
-        delimiter=None,
-        mode="rt",
-        buffering=-1,
-        compresslevel=9,
-        encoding=None,
-        errors=None,
-        newline=None,
+        path: str,
+        delimiter: str | None = None,
+        mode: str = "rt",
+        buffering: int = -1,
+        compresslevel: int = 9,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
     ):
         super(BZ2File, self).__init__(
             path,
@@ -200,8 +210,7 @@ class BZ2File(CompressedFile):
             errors=self.errors,
             newline=self.newline,
         ) as file_content:
-            for line in file_content:
-                yield line
+            yield from file_content
 
     def read(self):
         with bz2.open(
@@ -216,9 +225,11 @@ class BZ2File(CompressedFile):
 
 
 class XZFile(CompressedFile):
-    magic_bytes = b"\xfd\x37\x7a\x58\x5a\x00"
+    magic_bytes: bytes = b"\xfd\x37\x7a\x58\x5a\x00"
 
     # pylint: disable=too-many-instance-attributes
+    # pylint: disable=unknown-option-value
+    # pylint: disable=too-many-positional-arguments
     def __init__(
         self,
         path,
@@ -261,8 +272,7 @@ class XZFile(CompressedFile):
             errors=self.errors,
             newline=self.newline,
         ) as file_content:
-            for line in file_content:
-                yield line
+            yield from file_content
 
     def read(self):
         with lzma.open(
@@ -280,35 +290,35 @@ class XZFile(CompressedFile):
 
 
 COMPRESSION_CLASSES = [GZFile, BZ2File, XZFile]
-N_COMPRESSION_CHECK_BYTES = max(len(cls.magic_bytes) for cls in COMPRESSION_CLASSES)
+N_COMPRESSION_CHECK_BYTES = max(len(cls.magic_bytes) for cls in COMPRESSION_CLASSES)  # type: ignore
 
 
-def get_read_function(filename, disable_compression):
+def get_read_function(filename: str, disable_compression: bool):
     if disable_compression:
         return ReusableFile
-    else:
-        with open(filename, "rb") as f:
-            start_bytes = f.read(N_COMPRESSION_CHECK_BYTES)
-            for cls in COMPRESSION_CLASSES:
-                if cls.is_compressed(start_bytes):
-                    return cls
-
-            return ReusableFile
+    with open(filename, "rb") as f:
+        start_bytes = f.read(N_COMPRESSION_CHECK_BYTES)
+        for cls in COMPRESSION_CLASSES:
+            if cls.is_compressed(start_bytes):  # type: ignore
+                return cls
+        return ReusableFile
 
 
+# pylint: disable=unknown-option-value
+# pylint: disable=too-many-positional-arguments
 def universal_write_open(
-    path,
-    mode,
-    buffering=-1,
-    encoding=None,
-    errors=None,
-    newline=None,
-    compresslevel=9,
-    format=None,
-    check=-1,
-    preset=None,
-    filters=None,
-    compression=None,
+    path: str,
+    mode: str,
+    buffering: int = -1,
+    encoding: str | None = None,
+    errors: str | None = None,
+    newline: str | None = None,
+    compresslevel: int = 9,
+    format: int | None = None,
+    check: int = -1,
+    preset: int | None = None,
+    filters: Any = None,
+    compression: str | None = None,
 ):
     # pylint: disable=unexpected-keyword-arg,no-member
     if compression is None:
@@ -352,7 +362,5 @@ def universal_write_open(
         )
     else:
         raise ValueError(
-            "compression must be None, gz, gzip, lzma, or xz and was {0}".format(
-                compression
-            )
+            f"compression must be None, gz, gzip, lzma, or xz and was {compression}"
         )
